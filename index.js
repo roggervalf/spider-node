@@ -6,6 +6,27 @@ const mkdirp = require('mkdirp');
 const path = require('path');
 const utilities = require('./utilities');
 
+function spiderLinks(currentUrl, body, nesting, callback) {
+  if(nesting === 0) {
+    return process.nextTick(callback);
+  }
+
+  let links = utilities.getPageLinks(currentUrl, body);  //[1]
+  function iterate(index) {
+    if(index === links.length) {
+      return callback();
+    }
+
+    spider(links[index], nesting - 1, function(err) {
+      if(err) {
+        return callback(err);
+      }
+      iterate(index + 1);
+    });
+  }
+  iterate(0);
+}
+
 function saveFile(filename, contents, callback) {
   mkdirp(path.dirname(filename), err => {
     if(err) {
@@ -31,27 +52,31 @@ function download(url, filename, callback) {
   });
 }
 
-function spider(url, callback) {
+function spider(url, nesting, callback) {
   const filename = utilities.urlToFilename(url);
-  fs.exists(filename, exists => {
-    if(exists) {
-      return callback(null, filename, false);
-    }
-    download(url, filename, err => {
-      if(err) {
+  fs.readFile(filename, 'utf8', function(err, body) {
+    if(err) {
+      if(err.code !== 'ENOENT') {
         return callback(err);
       }
-      callback(null, filename, true);
-    })
+
+      return download(url, filename, function(err, body) {
+        if(err) {
+          return callback(err);
+        }
+        spiderLinks(url, body, nesting, callback);
+      });
+    }
+
+    spiderLinks(url, body, nesting, callback);
   });
 }
 
-spider(process.argv[2], (err, filename, downloaded) => {
+spider(process.argv[2], 1, (err) => {
   if(err) {
     console.log(err);
-  } else if(downloaded){
-    console.log(`Completed the download of "${filename}"`);
+    process.exit();
   } else {
-    console.log(`"${filename}" was already downloaded`);
+    console.log('Download complete');
   }
 });
